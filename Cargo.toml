@@ -1,0 +1,16 @@
+[package]
+name = "wgpu-util"
+version = "0.0.0-alpha.1"
+authors = ["Luis Wirth <lwirth2000@gmail.com>"]
+edition = "2018"
+
+description = "Utilities for working with wgpu-rs"
+keywords = ["graphics", "rendering", "wgpu", "utility"]
+homepage = "https://github.com/LU15W1R7H/wgpu-util"
+repository = "https://github.com/LU15W1R7H/wgpu-util"
+license = "Apache-2.0"
+
+[dependencies]
+wgpu = "0.7.1"
+
+replace_with = "0.1.7"
