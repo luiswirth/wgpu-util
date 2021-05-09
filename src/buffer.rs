@@ -1,3 +1,6 @@
+use crate::DeviceExt;
+
+/// A [`wgpu::Buffer`] which dynamically grows based on the contents.
 #[derive(Debug)]
 pub struct DynamicBuffer {
     raw: wgpu::Buffer,
@@ -24,7 +27,7 @@ impl DynamicBuffer {
 
     /// Create a new buffer with contents.
     pub fn new_init(device: &wgpu::Device, descriptor: &crate::BufferInitDescriptor) -> Self {
-        let raw = crate::create_buffer_init(device, &descriptor);
+        let raw = device.create_buffer_init(&descriptor);
 
         let descriptor = wgpu::BufferDescriptor {
             label: descriptor.label,
@@ -41,12 +44,18 @@ impl DynamicBuffer {
         }
     }
 
+    /// Uploads `data` and resizes the buffer if needed.
+    ///
+    /// If `data` fits, uploads using [`wgpu::Queue`], otherwise reallocates and uploads using
+    /// [`wgpu::Device`].
     pub fn upload(&mut self, device: &wgpu::Device, queue: &wgpu::Queue, data: &[u8]) {
         if self.try_upload(queue, data).is_err() {
             self.upload_by_init(device, data)
         }
     }
 
+    /// Uploades `data` using [`wgpu::Queue`] without resizing.
+    /// Fails if `data` doesn't fit in buffers and returns the size difference.
     pub fn try_upload(
         &mut self,
         queue: &wgpu::Queue,
@@ -62,19 +71,18 @@ impl DynamicBuffer {
         }
     }
 
+    /// Allocates a new buffer, replaces the old one and uploades the data using
+    /// [`wgpu::Device`].
     pub fn upload_by_init(&mut self, device: &wgpu::Device, data: &[u8]) {
-        crate::create_buffer_init(
-            device,
-            &crate::BufferInitDescriptor {
-                label: self.label.as_deref(),
-                contents: data,
-                usage: self.usage,
-                size: match Self::RESERVE {
-                    true => Some(new_size(self.size)),
-                    false => None,
-                },
+        device.create_buffer_init(&crate::BufferInitDescriptor {
+            label: self.label.as_deref(),
+            contents: data,
+            usage: self.usage,
+            size: match Self::RESERVE {
+                true => Some(new_size(self.size)),
+                false => None,
             },
-        );
+        });
     }
 
     /// Get a reference to the raw buffer.
@@ -88,7 +96,6 @@ impl DynamicBuffer {
     }
 }
 
-// TODO: grow function
 fn new_size(last_size: wgpu::BufferAddress) -> wgpu::BufferAddress {
     last_size.pow(2)
 }

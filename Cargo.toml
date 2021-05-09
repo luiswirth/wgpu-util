@@ -1,6 +1,6 @@
 [package]
 name = "wgpu-util"
-version = "0.0.0-alpha.2"
+version = "0.0.0-alpha.3"
 authors = ["Luis Wirth <lwirth2000@gmail.com>"]
 edition = "2018"
 
@@ -11,6 +11,6 @@ repository = "https://github.com/LU15W1R7H/wgpu-util"
 license = "Apache-2.0"
 
 [dependencies]
-wgpu = "0.8.0"
+wgpu = "0.8.1"
 
 replace_with = "0.1.7"
