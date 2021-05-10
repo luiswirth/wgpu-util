@@ -1,11 +1,5 @@
 //! wgpu-util is a utility crate for working with wgpu-rs.
 
-pub mod buffer;
-pub use buffer::DynamicBuffer;
-
-pub mod pool;
-pub use pool::{BufferPool, BufferPoolDescriptor};
-
 /// Owned [`wgpu::Label`].
 pub type OwnedLabel = Option<String>;
 
@@ -75,7 +69,8 @@ impl DeviceExt for wgpu::Device {
     }
 }
 
-/// [`wgpu::Buffer`] wrapper with size.
+/// Thin [`wgpu::Buffer`] wrapper with size.
+#[derive(Debug)]
 pub struct SizedBuffer {
     pub size: wgpu::BufferAddress,
     pub buffer: wgpu::Buffer,
@@ -87,33 +82,238 @@ impl SizedBuffer {
     }
 }
 
-// Private
-
-pub(crate) struct WriteDescriptor<'a> {
+pub struct BufferResizeWriteDescriptor<'a> {
     pub label: wgpu::Label<'a>,
-    pub data: &'a [u8],
+    pub contents: &'a [u8],
     pub usage: wgpu::BufferUsage,
 }
 
-#[inline]
-pub(crate) fn write(
+/// Write contents into buffer, resizes if necessary.
+///
+/// If contents don't fit, creates new buffer with appropriate size.
+pub fn resize_write_buffer(
     device: &wgpu::Device,
     queue: &wgpu::Queue,
     buffer: SizedBuffer,
-    descriptor: &WriteDescriptor,
+    descriptor: &BufferResizeWriteDescriptor,
 ) -> SizedBuffer {
-    let data_size = descriptor.data.len() as wgpu::BufferAddress;
-    let enough_space = data_size <= buffer.size;
+    let contents_size = descriptor.contents.len() as wgpu::BufferAddress;
+    let enough_space = contents_size <= buffer.size;
     if enough_space {
-        queue.write_buffer(&buffer.buffer, 0, descriptor.data);
+        queue.write_buffer(&buffer.buffer, 0, descriptor.contents);
         buffer
     } else {
         let new = device.create_buffer_init(&BufferInitDescriptor {
             label: descriptor.label,
-            contents: descriptor.data,
+            contents: descriptor.contents,
             size: None,
             usage: descriptor.usage,
         });
-        SizedBuffer::new(data_size, new)
+        SizedBuffer::new(contents_size, new)
     }
+}
+
+/// A [`wgpu::Buffer`] which dynamically grows based on the contents.
+#[derive(Debug)]
+pub struct DynamicBuffer {
+    raw: wgpu::Buffer,
+
+    label: crate::OwnedLabel,
+    size: wgpu::BufferAddress,
+    usage: wgpu::BufferUsage,
+}
+
+impl DynamicBuffer {
+    const RESERVE: bool = true;
+
+    /// Create a new empty buffer.
+    pub fn new(device: &wgpu::Device, descriptor: &wgpu::BufferDescriptor) -> Self {
+        let raw = device.create_buffer(&descriptor);
+
+        Self {
+            raw,
+            label: descriptor.label.map(|l| l.to_owned()),
+            size: descriptor.size,
+            usage: descriptor.usage,
+        }
+    }
+
+    /// Create a new buffer with contents.
+    pub fn new_init(device: &wgpu::Device, descriptor: &crate::BufferInitDescriptor) -> Self {
+        let raw = device.create_buffer_init(&descriptor);
+
+        let descriptor = wgpu::BufferDescriptor {
+            label: descriptor.label,
+            size: descriptor.contents.len() as wgpu::BufferAddress,
+            usage: descriptor.usage,
+            mapped_at_creation: false,
+        };
+
+        Self {
+            raw,
+            label: descriptor.label.map(|l| l.to_owned()),
+            size: descriptor.size,
+            usage: descriptor.usage,
+        }
+    }
+
+    /// Uploads `contents` and resizes the buffer if needed.
+    ///
+    /// If `contents` fits, uploads using [`wgpu::Queue`], otherwise reallocates and uploads using
+    /// [`wgpu::Device`].
+    pub fn upload(&mut self, device: &wgpu::Device, queue: &wgpu::Queue, contents: &[u8]) {
+        if self.try_upload(queue, contents).is_err() {
+            self.upload_by_init(device, contents)
+        }
+    }
+
+    /// Uploades `data` using [`wgpu::Queue`] without resizing.
+    /// Fails if `data` doesn't fit in buffers and returns the size difference.
+    pub fn try_upload(
+        &mut self,
+        queue: &wgpu::Queue,
+        contents: &[u8],
+    ) -> Result<(), wgpu::BufferAddress> {
+        let contents_size = contents.len() as wgpu::BufferAddress;
+        if contents_size < self.size {
+            queue.write_buffer(&self.raw, 0, contents);
+            self.size = contents_size;
+            Ok(())
+        } else {
+            Err(contents_size - self.size)
+        }
+    }
+
+    /// Allocates a new buffer, replaces the old one and uploades the contents using
+    /// [`wgpu::Device`].
+    pub fn upload_by_init(&mut self, device: &wgpu::Device, contents: &[u8]) {
+        device.create_buffer_init(&crate::BufferInitDescriptor {
+            label: self.label.as_deref(),
+            contents,
+            usage: self.usage,
+            size: match Self::RESERVE {
+                true => Some(reserve_function(self.size)),
+                false => None,
+            },
+        });
+    }
+
+    /// Get a reference to the raw buffer.
+    pub fn raw(&self) -> &wgpu::Buffer {
+        &self.raw
+    }
+
+    /// Convert into raw buffer.
+    pub fn into_raw(self) -> wgpu::Buffer {
+        self.raw
+    }
+}
+
+fn reserve_function(last_size: wgpu::BufferAddress) -> wgpu::BufferAddress {
+    last_size.pow(2)
+}
+
+/// A [`wgpu::Buffer`] Pool (dynamic supply).
+#[derive(Debug)]
+pub struct BufferPool {
+    buffers: Vec<SizedBuffer>,
+    occupied: usize,
+
+    label: crate::OwnedLabel,
+    usage: wgpu::BufferUsage,
+}
+
+impl BufferPool {
+    /// Creates a new empty pool.
+    pub fn new(descriptor: &BufferPoolDescriptor) -> Self {
+        Self {
+            buffers: Vec::new(),
+            occupied: 0,
+
+            label: descriptor.label.map(|l| l.to_owned()),
+            usage: descriptor.usage,
+        }
+    }
+
+    /// Upload contents to a vacant buffer.
+    ///
+    /// Returns buffer index.
+    /// If no vacant buffer is available, a new one is allocated.
+    pub fn upload(&mut self, device: &wgpu::Device, queue: &wgpu::Queue, contents: &[u8]) -> usize {
+        if self.occupied < self.buffers.len() {
+            let buffer = &mut self.buffers[self.occupied];
+
+            // CCDF
+            let label = self.label.as_deref();
+            let usage = self.usage;
+            replace_with::replace_with_or_abort(buffer, |buffer| {
+                resize_write_buffer(
+                    device,
+                    queue,
+                    buffer,
+                    &BufferResizeWriteDescriptor {
+                        label,
+                        contents,
+                        usage,
+                    },
+                )
+            });
+
+            self.occupied += 1;
+            self.occupied
+        } else {
+            self.buffers.push(self.create_buffer(device, contents));
+            self.occupied += 1;
+            self.occupied
+        }
+    }
+
+    /// Clears pool. Buffers are marked as vacant and reusable.
+    pub fn clear(&mut self) {
+        self.occupied = 0;
+    }
+
+    /// Get occupied buffer by index.
+    pub fn get(&self, i: usize) -> Option<&wgpu::Buffer> {
+        if i < self.occupied {
+            Some(&self.buffers[i].buffer)
+        } else {
+            None
+        }
+    }
+
+    /// Get any (occupied and vacant) buffer by index.
+    pub fn get_any(&self, i: usize) -> Option<&wgpu::Buffer> {
+        self.buffers.get(i).map(|b| &b.buffer)
+    }
+
+    /// Pool size (occupied + vacant)
+    pub fn size(&self) -> usize {
+        self.buffers.len()
+    }
+
+    /// Number of occupied buffers
+    pub fn occupied(&self) -> usize {
+        self.occupied
+    }
+}
+
+impl BufferPool {
+    fn create_buffer(&self, device: &wgpu::Device, contents: &[u8]) -> SizedBuffer {
+        let buffer = device.create_buffer_init(&BufferInitDescriptor {
+            label: self.label.as_deref(),
+            contents,
+            usage: self.usage,
+            size: None,
+        });
+        SizedBuffer::new(contents.len() as wgpu::BufferAddress, buffer)
+    }
+}
+
+/// Descriptor for [`BufferPool`]
+pub struct BufferPoolDescriptor<'a> {
+    /// Label assigned to all buffers
+    pub label: wgpu::Label<'a>,
+    /// Usages for all buffer
+    pub usage: wgpu::BufferUsage,
 }
