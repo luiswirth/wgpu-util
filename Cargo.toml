@@ -11,6 +11,6 @@ repository = "https://github.com/LU15W1R7H/wgpu-util"
 license = "Apache-2.0"
 
 [dependencies]
-wgpu = "0.8.1"
+wgpu = "0.9.0"
 
 replace_with = "0.1.7"

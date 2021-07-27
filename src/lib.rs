@@ -258,14 +258,11 @@ impl BufferPool {
                     },
                 )
             });
-
-            self.occupied += 1;
-            self.occupied
         } else {
             self.buffers.push(self.create_buffer(device, contents));
-            self.occupied += 1;
-            self.occupied
         }
+        self.occupied += 1;
+        self.occupied
     }
 
     /// Clears pool. Buffers are marked as vacant and reusable.
