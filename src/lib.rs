@@ -14,7 +14,7 @@ pub struct BufferInitDescriptor<'a> {
     pub size: Option<wgpu::BufferAddress>,
     /// Usages of a buffer. If the buffer is used in any way that isn't specified here, the operation
     /// will panic.
-    pub usage: wgpu::BufferUsage,
+    pub usage: wgpu::BufferUsages,
 }
 
 /// Extension trait for [`wgpu::Device`].
@@ -85,7 +85,7 @@ impl SizedBuffer {
 pub struct BufferResizeWriteDescriptor<'a> {
     pub label: wgpu::Label<'a>,
     pub contents: &'a [u8],
-    pub usage: wgpu::BufferUsage,
+    pub usage: wgpu::BufferUsages,
 }
 
 /// Write contents into buffer, resizes if necessary.
@@ -120,7 +120,7 @@ pub struct DynamicBuffer {
 
     label: crate::OwnedLabel,
     size: wgpu::BufferAddress,
-    usage: wgpu::BufferUsage,
+    usage: wgpu::BufferUsages,
 }
 
 impl DynamicBuffer {
@@ -220,7 +220,7 @@ pub struct BufferPool {
     occupied: usize,
 
     label: crate::OwnedLabel,
-    usage: wgpu::BufferUsage,
+    usage: wgpu::BufferUsages,
 }
 
 impl BufferPool {
@@ -312,5 +312,5 @@ pub struct BufferPoolDescriptor<'a> {
     /// Label assigned to all buffers
     pub label: wgpu::Label<'a>,
     /// Usages for all buffer
-    pub usage: wgpu::BufferUsage,
+    pub usage: wgpu::BufferUsages,
 }
