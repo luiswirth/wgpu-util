@@ -1,9 +1,8 @@
 [package]
 name = "wgpu-util"
-version = "0.1.0"
+version = "0.2.0"
 authors = ["Luis Wirth <lwirth2000@gmail.com>"]
-edition = "2018"
-resolver = "2"
+edition = "2021"
 
 description = "Utilities for working with wgpu-rs"
 keywords = ["graphics", "rendering", "wgpu", "utility"]
