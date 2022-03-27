@@ -128,7 +128,7 @@ impl DynamicBuffer {
 
     /// Create a new empty buffer.
     pub fn new(device: &wgpu::Device, descriptor: &wgpu::BufferDescriptor) -> Self {
-        let raw = device.create_buffer(&descriptor);
+        let raw = device.create_buffer(descriptor);
 
         Self {
             raw,
@@ -140,7 +140,7 @@ impl DynamicBuffer {
 
     /// Create a new buffer with contents.
     pub fn new_init(device: &wgpu::Device, descriptor: &crate::BufferInitDescriptor) -> Self {
-        let raw = device.create_buffer_init(&descriptor);
+        let raw = device.create_buffer_init(descriptor);
 
         let descriptor = wgpu::BufferDescriptor {
             label: descriptor.label,
