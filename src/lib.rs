@@ -40,32 +40,39 @@ impl DeviceExt for wgpu::Device {
             }
         };
 
-        // Valid vulkan usage is
-        // 1. buffer size must be a multiple of COPY_BUFFER_ALIGNMENT.
-        // 2. buffer size must be greater than 0.
-        // Therefore we round the value up to the nearest multiple, and ensure it's at least COPY_BUFFER_ALIGNMENT.
-        let align_mask = wgpu::COPY_BUFFER_ALIGNMENT - 1;
-        let padded_size =
-            ((unpadded_size + align_mask) & !align_mask).max(wgpu::COPY_BUFFER_ALIGNMENT);
+        if unpadded_size == 0 {
+            let wgt_descriptor = wgpu::BufferDescriptor {
+                label: descriptor.label,
+                size: 0,
+                usage: descriptor.usage,
+                mapped_at_creation: false,
+            };
 
-        let normal_descriptor = wgpu::BufferDescriptor {
-            label: descriptor.label,
-            size: padded_size,
-            usage: descriptor.usage,
-            mapped_at_creation: true,
-        };
+            self.create_buffer(&wgt_descriptor)
+        } else {
+            // Valid vulkan usage is
+            // 1. buffer size must be a multiple of COPY_BUFFER_ALIGNMENT.
+            // 2. buffer size must be greater than 0.
+            // Therefore we round the value up to the nearest multiple, and ensure it's at least COPY_BUFFER_ALIGNMENT.
+            let align_mask = wgpu::COPY_BUFFER_ALIGNMENT - 1;
+            let padded_size =
+                ((unpadded_size + align_mask) & !align_mask).max(wgpu::COPY_BUFFER_ALIGNMENT);
 
-        let buffer = self.create_buffer(&normal_descriptor);
-        {
-            let mut slice = buffer.slice(..).get_mapped_range_mut();
-            slice[0..unpadded_size as usize].copy_from_slice(descriptor.contents);
+            let wgt_descriptor = wgpu::BufferDescriptor {
+                label: descriptor.label,
+                size: padded_size,
+                usage: descriptor.usage,
+                mapped_at_creation: true,
+            };
 
-            for i in unpadded_size..padded_size {
-                slice[i as usize] = 0;
-            }
+            let buffer = self.create_buffer(&wgt_descriptor);
+
+            buffer.slice(..).get_mapped_range_mut()[..unpadded_size as usize]
+                .copy_from_slice(descriptor.contents);
+            buffer.unmap();
+
+            buffer
         }
-        buffer.unmap();
-        buffer
     }
 }
 
@@ -243,18 +250,15 @@ impl BufferPool {
         if self.occupied < self.buffers.len() {
             let buffer = &mut self.buffers[self.occupied];
 
-            // CCDF
-            let label = self.label.as_deref();
-            let usage = self.usage;
             replace_with::replace_with_or_abort(buffer, |buffer| {
                 resize_write_buffer(
                     device,
                     queue,
                     buffer,
                     &BufferResizeWriteDescriptor {
-                        label,
+                        label: self.label.as_deref(),
                         contents,
-                        usage,
+                        usage: self.usage,
                     },
                 )
             });
